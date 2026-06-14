@@ -25,6 +25,7 @@ export default function AudiencePage() {
   const [result, setResult]     = useState<AudienceResponse | null>(null);
   const [error, setError]       = useState<string | null>(null);
   const [prefill, setPrefill]   = useState<Opportunity | null>(null);
+  const [animComplete, setAnimComplete] = useState(false);
   const router                  = useRouter();
   const inputRef                = useRef<HTMLTextAreaElement>(null);
 
@@ -46,28 +47,27 @@ export default function AudiencePage() {
     } catch {}
   }, []);
 
+  // Transition when BOTH animation is done AND result has arrived — no stale closures
+  useEffect(() => {
+    if (animComplete && result) setStage("result");
+    if (animComplete && error)  setStage("input");
+  }, [animComplete, result, error]);
+
   async function handleSubmit() {
     if (query.trim().length < 5) return;
     setError(null);
+    setAnimComplete(false);
     setStage("thinking");
-
-    // Fetch result in parallel with thinking animation
     api.generateAudience({ query }).then(setResult).catch((e) => {
       setError(e.message);
-      setStage("input");
     });
   }
 
   function handleThinkingComplete() {
-    if (result) setStage("result");
-    else {
-      // result not ready yet — wait
-      const interval = setInterval(() => {
-        if (result) { clearInterval(interval); setStage("result"); }
-        if (error)  { clearInterval(interval); setStage("input"); }
-      }, 200);
-    }
+    setAnimComplete(true);
   }
+
+
 
   function handleProceed() {
     if (!result) return;

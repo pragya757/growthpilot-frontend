@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { api } from "@/services/api";
@@ -31,17 +31,15 @@ function MetricRow({ label, a, b, aWins, bWins }: MetricRowProps) {
 }
 
 export default function CampaignArenaPage() {
-  const [stage, setStage]       = useState<Stage>("thinking");
-  const [sim, setSim]           = useState<SimulateResponse | null>(null);
-  const [simError, setSimError] = useState(false);
-  const [selected, setSelected] = useState<"A" | "B" | null>(null);
-  const [audience, setAudience] = useState<AudienceResponse | null>(null);
-  const router                  = useRouter();
+  const [stage, setStage]         = useState<Stage>("thinking");
+  const [sim, setSim]             = useState<SimulateResponse | null>(null);
+  const [simError, setSimError]   = useState(false);
+  const [animComplete, setAnimComplete] = useState(false);
+  const [selected, setSelected]   = useState<"A" | "B" | null>(null);
+  const [audience, setAudience]   = useState<AudienceResponse | null>(null);
+  const router                    = useRouter();
 
-  // Ref always holds the latest sim — fixes stale closure inside setInterval
-  const simRef = useRef<SimulateResponse | null>(null);
-  useEffect(() => { simRef.current = sim; }, [sim]);
-
+  // ─── Fetch simulate-campaign on mount ───────────────────────────────────────
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem("audience_result");
@@ -51,34 +49,24 @@ export default function CampaignArenaPage() {
       api.simulateCampaign({
         segment_query: aud.query,
         audience_size: aud.estimated_customers,
-      }).then((result) => {
-        setSim(result);
-        simRef.current = result;
-      }).catch((err) => {
+      }).then(setSim).catch((err) => {
         console.error("simulate-campaign failed:", err);
         setSimError(true);
       });
     } catch { router.push("/audience"); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function handleThinkingComplete() {
-    // Read from ref — avoids stale closure bug where sim is always null
-    if (simRef.current) {
+  // ─── Transition to arena when BOTH animation is done AND sim has arrived ────
+  // useEffect deps are always fresh — no stale closure possible
+  useEffect(() => {
+    if (animComplete && sim) {
       setStage("arena");
-      return;
     }
-    // API hasn't responded yet — poll until it does (handles Render cold-start latency)
-    const iv = setInterval(() => {
-      if (simRef.current) {
-        clearInterval(iv);
-        setStage("arena");
-      }
-    }, 200);
-    // Safety: after 20s give up and show error
-    setTimeout(() => {
-      clearInterval(iv);
-      if (!simRef.current) setSimError(true);
-    }, 20000);
+  }, [animComplete, sim]);
+
+  // Called by AIThinkingSteps when all steps complete
+  function handleThinkingComplete() {
+    setAnimComplete(true);
   }
 
   function handleLaunch() {
@@ -130,7 +118,11 @@ export default function CampaignArenaPage() {
       <AnimatePresence mode="wait">
         {stage === "thinking" && (
           <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-md">
-            <AIThinkingSteps steps={THINKING_STEPS} onComplete={handleThinkingComplete} contextNote="Incorporating 2 past campaign memories into predictions." />
+            <AIThinkingSteps
+              steps={THINKING_STEPS}
+              onComplete={handleThinkingComplete}
+              contextNote="Incorporating 2 past campaign memories into predictions."
+            />
           </motion.div>
         )}
 
@@ -156,7 +148,6 @@ export default function CampaignArenaPage() {
 
             {/* Battle Arena */}
             <div className="grid grid-cols-[1fr_auto_1fr] gap-0 items-stretch">
-              {/* Strategy A */}
               <StrategyCard
                 label="A"
                 strategy={s.strategy_a}
@@ -164,8 +155,6 @@ export default function CampaignArenaPage() {
                 selected={selected === "A"}
                 onSelect={() => setSelected("A")}
               />
-
-              {/* VS divider */}
               <div className="flex flex-col items-center justify-center px-4 gap-3">
                 <div className="w-px flex-1 bg-border-dim" />
                 <div className="glass-bright rounded-xl px-3 py-2 text-center">
@@ -178,8 +167,6 @@ export default function CampaignArenaPage() {
                 </div>
                 <div className="w-px flex-1 bg-border-dim" />
               </div>
-
-              {/* Strategy B */}
               <StrategyCard
                 label="B"
                 strategy={s.strategy_b}
@@ -192,13 +179,13 @@ export default function CampaignArenaPage() {
             {/* Comparison table */}
             <div className="bg-bg-surface border border-border-dim rounded-xl p-5">
               <SectionLabel className="mb-3">Side-by-Side Comparison</SectionLabel>
-              <MetricRow label="Revenue"    a={formatRevenue(s.strategy_a.estimated_revenue)} b={formatRevenue(s.strategy_b.estimated_revenue)} aWins={s.strategy_a.estimated_revenue > s.strategy_b.estimated_revenue} bWins={s.strategy_b.estimated_revenue > s.strategy_a.estimated_revenue} />
-              <MetricRow label="ROI"        a={formatROI(s.strategy_a.roi)}      b={formatROI(s.strategy_b.roi)}      aWins={s.strategy_a.roi > s.strategy_b.roi}      bWins={s.strategy_b.roi > s.strategy_a.roi} />
-              <MetricRow label="Open Rate"  a={formatPct(s.strategy_a.open_rate)} b={formatPct(s.strategy_b.open_rate)} aWins={s.strategy_a.open_rate > s.strategy_b.open_rate} bWins={s.strategy_b.open_rate > s.strategy_a.open_rate} />
-              <MetricRow label="Cost"       a={`₹${s.strategy_a.cost.toLocaleString()}`} b={`₹${s.strategy_b.cost.toLocaleString()}`} aWins={s.strategy_a.cost < s.strategy_b.cost} bWins={s.strategy_b.cost < s.strategy_a.cost} />
+              <MetricRow label="Revenue"   a={formatRevenue(s.strategy_a.estimated_revenue)} b={formatRevenue(s.strategy_b.estimated_revenue)} aWins={s.strategy_a.estimated_revenue > s.strategy_b.estimated_revenue} bWins={s.strategy_b.estimated_revenue > s.strategy_a.estimated_revenue} />
+              <MetricRow label="ROI"       a={formatROI(s.strategy_a.roi)}       b={formatROI(s.strategy_b.roi)}       aWins={s.strategy_a.roi > s.strategy_b.roi}       bWins={s.strategy_b.roi > s.strategy_a.roi} />
+              <MetricRow label="Open Rate" a={formatPct(s.strategy_a.open_rate)} b={formatPct(s.strategy_b.open_rate)} aWins={s.strategy_a.open_rate > s.strategy_b.open_rate} bWins={s.strategy_b.open_rate > s.strategy_a.open_rate} />
+              <MetricRow label="Cost"      a={`₹${s.strategy_a.cost.toLocaleString()}`} b={`₹${s.strategy_b.cost.toLocaleString()}`} aWins={s.strategy_a.cost < s.strategy_b.cost} bWins={s.strategy_b.cost < s.strategy_a.cost} />
             </div>
 
-            {/* Launch */}
+            {/* Launch buttons */}
             <div className="flex gap-3">
               <button onClick={() => router.push("/audience")} className="px-4 py-2.5 text-[13px] border border-border-bright text-text-secondary rounded-lg hover:text-text-primary transition-all">
                 ← Back
@@ -247,8 +234,6 @@ function StrategyCard({ label, strategy, recommended, selected, onSelect }: Stra
           AI PICK
         </div>
       )}
-
-      {/* Header */}
       <div className="flex items-center justify-between mb-4 pt-1">
         <div>
           <p className="text-[10px] text-text-muted uppercase tracking-widest">Strategy {label}</p>
@@ -265,19 +250,15 @@ function StrategyCard({ label, strategy, recommended, selected, onSelect }: Stra
           </div>
         )}
       </div>
-
-      {/* Revenue hero */}
       <div className="bg-bg-elevated rounded-lg p-3.5 mb-4">
         <p className="text-[10px] text-text-muted uppercase tracking-widest mb-1">Est. Revenue</p>
         <p className="text-2xl font-black text-text-primary">{formatRevenue(strategy.estimated_revenue)}</p>
         <p className="text-[11px] text-text-muted mt-0.5">{formatROI(strategy.roi)} ROI · ₹{strategy.cost.toLocaleString()} spend</p>
       </div>
-
-      {/* Metrics */}
       <div className="space-y-2 mb-4">
         {[
-          { label: "Open Rate",    value: strategy.open_rate,       display: formatPct(strategy.open_rate) },
-          { label: "Conversion",   value: strategy.conversion_rate,  display: formatPct(strategy.conversion_rate) },
+          { label: "Open Rate",  value: strategy.open_rate,      display: formatPct(strategy.open_rate) },
+          { label: "Conversion", value: strategy.conversion_rate, display: formatPct(strategy.conversion_rate) },
         ].map((m) => (
           <div key={m.label}>
             <div className="flex justify-between mb-1">
@@ -295,16 +276,12 @@ function StrategyCard({ label, strategy, recommended, selected, onSelect }: Stra
           </div>
         ))}
       </div>
-
-      {/* Message preview */}
       <div className="bg-bg-elevated rounded-lg p-3 mb-4">
         <p className="text-[10px] text-text-muted mb-1.5">Message Preview</p>
         <p className="text-[11px] text-text-secondary font-mono leading-relaxed line-clamp-3">
           {strategy.message_sample}
         </p>
       </div>
-
-      {/* AI Reasoning */}
       <p className="text-[11px] text-text-muted leading-relaxed">{strategy.ai_reasoning}</p>
     </motion.div>
   );
