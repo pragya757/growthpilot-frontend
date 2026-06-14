@@ -39,32 +39,37 @@ export default function CampaignArenaPage() {
   const [audience, setAudience]   = useState<AudienceResponse | null>(null);
   const router                    = useRouter();
 
-  // ─── Fetch simulate-campaign on mount ───────────────────────────────────────
+  // ─── Fetch simulate-campaign on mount — with 30s timeout ────────────────────
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem("audience_result");
       if (!raw) { router.push("/audience"); return; }
       const aud: AudienceResponse = JSON.parse(raw);
       setAudience(aud);
+
+      const timeout = setTimeout(() => setSimError(true), 30000);
+
       api.simulateCampaign({
         segment_query: aud.query,
         audience_size: aud.estimated_customers,
-      }).then(setSim).catch((err) => {
+      }).then((result) => {
+        clearTimeout(timeout);
+        setSim(result);
+      }).catch((err) => {
+        clearTimeout(timeout);
         console.error("simulate-campaign failed:", err);
         setSimError(true);
       });
+
+      return () => clearTimeout(timeout);
     } catch { router.push("/audience"); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Transition to arena when BOTH animation is done AND sim has arrived ────
-  // useEffect deps are always fresh — no stale closure possible
+  // ─── Transition to arena when BOTH animation done AND sim arrived ────────────
   useEffect(() => {
-    if (animComplete && sim) {
-      setStage("arena");
-    }
+    if (animComplete && sim) setStage("arena");
   }, [animComplete, sim]);
 
-  // Called by AIThinkingSteps when all steps complete
   function handleThinkingComplete() {
     setAnimComplete(true);
   }
@@ -117,12 +122,23 @@ export default function CampaignArenaPage() {
 
       <AnimatePresence mode="wait">
         {stage === "thinking" && (
-          <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-md">
+          <motion.div key="thinking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="max-w-md space-y-4">
             <AIThinkingSteps
               steps={THINKING_STEPS}
               onComplete={handleThinkingComplete}
               contextNote="Incorporating 2 past campaign memories into predictions."
             />
+            {/* Show spinner after animation is done but API hasn't responded yet */}
+            {animComplete && !sim && !simError && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex items-center gap-3 px-4 py-3 bg-bg-elevated border border-border-dim rounded-xl"
+              >
+                <div className="w-4 h-4 border-2 border-accent-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                <p className="text-[13px] text-text-secondary">Generating strategy data — backend warming up, please wait…</p>
+              </motion.div>
+            )}
           </motion.div>
         )}
 

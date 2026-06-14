@@ -124,6 +124,7 @@ function AnalyticsInner() {
   // Immediately use URL param — don't wait for the campaigns list to load
   const [selected, setSelected]   = useState<string | null>(campaignId);
   const [done, setDone]           = useState(false);
+  const [notFound, setNotFound]   = useState(false);
 
   useEffect(() => {
     api.getAllCampaigns()
@@ -136,15 +137,22 @@ function AnalyticsInner() {
       .finally(() => setListLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Reset notFound when user switches campaign
+  useEffect(() => { setNotFound(false); }, [selected]);
+
   const fetcher = useCallback(
     () => (selected ? api.getAnalytics(selected) : Promise.reject("no campaign")),
     [selected],
   );
 
-  const { data } = usePolling<AnalyticsResponse>(fetcher, 2000, !!selected && !done);
+  const { data, error } = usePolling<AnalyticsResponse>(fetcher, 2000, !!selected && !done && !notFound);
 
   useEffect(() => { if (data?.status === "purchased") setDone(true); }, [data?.status]);
   useEffect(() => { setDone(false); }, [selected]);
+  // Backend returned 404 — campaign gone (server restarted)
+  useEffect(() => {
+    if (error && selected) setNotFound(true);
+  }, [error, selected]);
 
   const d = data;
 
@@ -175,7 +183,19 @@ function AnalyticsInner() {
         </div>
       )}
 
-      {!d ? (
+      {notFound ? (
+        <div className="text-center py-20 border border-dashed border-border-dim rounded-xl max-w-lg">
+          <p className="text-2xl mb-3">🔄</p>
+          <p className="text-text-primary font-medium mb-1">Campaign data not found</p>
+          <p className="text-text-muted text-[13px] mb-4">
+            The backend server restarted and cleared its memory.
+            Launch a new campaign to see live analytics.
+          </p>
+          <button onClick={() => router.push("/")} className="text-accent-primary text-[13px] hover:underline">
+            Start a new campaign →
+          </button>
+        </div>
+      ) : !d ? (
         // Show spinner while: list is loading OR a campaign is selected but data not yet arrived
         listLoading || selected ? (
           <div className="flex items-center justify-center py-16">
