@@ -120,6 +120,8 @@ function AnalyticsInner() {
   const campaignId   = searchParams.get("campaign");
 
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [listLoading, setListLoading] = useState(true);
+  // Immediately use URL param — don't wait for the campaigns list to load
   const [selected, setSelected]   = useState<string | null>(campaignId);
   const [done, setDone]           = useState(false);
 
@@ -127,9 +129,11 @@ function AnalyticsInner() {
     api.getAllCampaigns()
       .then((r) => {
         setCampaigns(r.campaigns);
+        // Auto-select first only if nothing is already selected
         if (!selected && r.campaigns.length > 0) setSelected(r.campaigns[0].id);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setListLoading(false));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetcher = useCallback(
@@ -172,7 +176,12 @@ function AnalyticsInner() {
       )}
 
       {!d ? (
-        campaigns.length === 0 ? (
+        // Show spinner while: list is loading OR a campaign is selected but data not yet arrived
+        listLoading || selected ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-6 h-6 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
           <div className="text-center py-20 border border-dashed border-border-dim rounded-xl max-w-lg">
             <p className="text-2xl mb-3">📊</p>
             <p className="text-text-primary font-medium mb-1">No campaigns yet</p>
@@ -180,10 +189,6 @@ function AnalyticsInner() {
             <button onClick={() => router.push("/")} className="text-accent-primary text-[13px] hover:underline">
               Find opportunities →
             </button>
-          </div>
-        ) : (
-          <div className="flex items-center justify-center py-16">
-            <div className="w-6 h-6 border-2 border-accent-primary border-t-transparent rounded-full animate-spin" />
           </div>
         )
       ) : (

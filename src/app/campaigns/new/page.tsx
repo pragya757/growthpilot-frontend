@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { api } from "@/services/api";
@@ -31,11 +31,16 @@ function MetricRow({ label, a, b, aWins, bWins }: MetricRowProps) {
 }
 
 export default function CampaignArenaPage() {
-  const [stage, setStage]     = useState<Stage>("thinking");
-  const [sim, setSim]         = useState<SimulateResponse | null>(null);
+  const [stage, setStage]       = useState<Stage>("thinking");
+  const [sim, setSim]           = useState<SimulateResponse | null>(null);
+  const [simError, setSimError] = useState(false);
   const [selected, setSelected] = useState<"A" | "B" | null>(null);
   const [audience, setAudience] = useState<AudienceResponse | null>(null);
-  const router                = useRouter();
+  const router                  = useRouter();
+
+  // Ref always holds the latest sim — fixes stale closure inside setInterval
+  const simRef = useRef<SimulateResponse | null>(null);
+  useEffect(() => { simRef.current = sim; }, [sim]);
 
   useEffect(() => {
     try {
@@ -46,15 +51,34 @@ export default function CampaignArenaPage() {
       api.simulateCampaign({
         segment_query: aud.query,
         audience_size: aud.estimated_customers,
-      }).then(setSim).catch(console.error);
+      }).then((result) => {
+        setSim(result);
+        simRef.current = result;
+      }).catch((err) => {
+        console.error("simulate-campaign failed:", err);
+        setSimError(true);
+      });
     } catch { router.push("/audience"); }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleThinkingComplete() {
-    if (sim) setStage("arena");
-    else {
-      const iv = setInterval(() => { if (sim) { clearInterval(iv); setStage("arena"); } }, 200);
+    // Read from ref — avoids stale closure bug where sim is always null
+    if (simRef.current) {
+      setStage("arena");
+      return;
     }
+    // API hasn't responded yet — poll until it does (handles Render cold-start latency)
+    const iv = setInterval(() => {
+      if (simRef.current) {
+        clearInterval(iv);
+        setStage("arena");
+      }
+    }, 200);
+    // Safety: after 20s give up and show error
+    setTimeout(() => {
+      clearInterval(iv);
+      if (!simRef.current) setSimError(true);
+    }, 20000);
   }
 
   function handleLaunch() {
@@ -71,6 +95,25 @@ export default function CampaignArenaPage() {
   }
 
   const s = sim;
+
+  // Error state
+  if (simError) {
+    return (
+      <div className="min-h-screen px-8 py-8 flex items-center justify-center">
+        <div className="text-center max-w-sm">
+          <p className="text-2xl mb-3">⚠️</p>
+          <p className="text-text-primary font-semibold mb-1">Strategy generation failed</p>
+          <p className="text-text-muted text-[13px] mb-4">The backend took too long to respond. Please try again.</p>
+          <button
+            onClick={() => router.push("/audience")}
+            className="px-4 py-2.5 text-[13px] font-semibold bg-accent-primary text-white rounded-lg hover:bg-accent-primary/90 transition-all"
+          >
+            ← Back to Audience Builder
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen px-8 py-8">
